@@ -1,0 +1,10 @@
+[Unit]
+Description=Apply OrderPy bridge update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=ORDERPY_BRIDGE_RUNTIME_DIR=/run/orderpy-bridge
+ExecStart=/opt/orderpy-bridge/updater/orderpy-bridge-updater.sh
+TimeoutStartSec=600

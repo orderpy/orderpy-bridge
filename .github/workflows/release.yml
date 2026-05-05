@@ -1,0 +1,118 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver X.Y.Z (no v prefix)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          echo "ver=$V" >> "$GITHUB_OUTPUT"
+          if ! echo "$V" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid semver: $V"
+            exit 1
+          fi
+
+      - name: Test and vet
+        run: |
+          go test ./...
+          go vet ./...
+          go build -trimpath -o /dev/null ./...
+
+      - name: Stage tarball contents
+        env:
+          VER: ${{ steps.ver.outputs.ver }}
+        run: |
+          set -eux
+          STAGE="stage/orderpy-bridge-${VER}"
+          mkdir -p "${STAGE}/updater" "${STAGE}/systemd"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath \
+            -ldflags "-s -w -X github.com/orderpy/orderpy-bridge-go/internal/version.Version=${VER}" \
+            -o "${STAGE}/bridge" ./cmd/bridge
+          cp deploy/updater/orderpy-bridge-updater.sh "${STAGE}/updater/"
+          cp deploy/updater/minisign.pub "${STAGE}/updater/"
+          chmod +x "${STAGE}/updater/orderpy-bridge-updater.sh"
+          cp deploy/systemd/*.service deploy/systemd/*.path "${STAGE}/systemd/"
+          cp deploy/packaging/install.sh "${STAGE}/install.sh"
+          chmod +x "${STAGE}/install.sh"
+          printf '%s\n' "$VER" > "${STAGE}/VERSION"
+          mkdir -p dist
+          tar -czf "dist/orderpy-bridge-${VER}.tar.gz" -C stage "orderpy-bridge-${VER}"
+          sha256sum "dist/orderpy-bridge-${VER}.tar.gz" | awk '{print $1}' > "dist/orderpy-bridge-${VER}.sha256"
+
+      - name: Install minisign and sign
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          VER: ${{ steps.ver.outputs.ver }}
+        run: |
+          set -eux
+          if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
+            echo "Repository secret MINISIGN_SECRET_KEY is not set (full contents of minisign.key)."
+            exit 1
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq minisign
+          KEY=$(mktemp)
+          printf '%s' "$MINISIGN_SECRET_KEY" > "$KEY"
+          chmod 600 "$KEY"
+          echo "${MINISIGN_PASSWORD:-}" | minisign -S -s "$KEY" \
+            -m "dist/orderpy-bridge-${VER}.tar.gz" \
+            -x "dist/orderpy-bridge-${VER}.tar.gz.minisig"
+          shred -u "$KEY" 2>/dev/null || rm -f "$KEY"
+          minisign -V -p deploy/updater/minisign.pub \
+            -m "dist/orderpy-bridge-${VER}.tar.gz" \
+            -x "dist/orderpy-bridge-${VER}.tar.gz.minisig"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VER: ${{ steps.ver.outputs.ver }}
+        run: |
+          set -eux
+          TAG="v${VER}"
+          ASSETS=(
+            "dist/orderpy-bridge-${VER}.tar.gz"
+            "dist/orderpy-bridge-${VER}.tar.gz.minisig"
+            "dist/orderpy-bridge-${VER}.sha256"
+          )
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            gh release create "$TAG" "${ASSETS[@]}" \
+              --title "$TAG" \
+              --generate-notes \
+              --target "${{ github.sha }}"
+          else
+            gh release create "$TAG" "${ASSETS[@]}" \
+              --title "$TAG" \
+              --generate-notes \
+              --verify-tag
+          fi

@@ -1,0 +1,25 @@
+[Unit]
+Description=OrderPy Bridge (Go: WebSocket + local HTTP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orderpy-bridge
+Group=orderpy-bridge
+RuntimeDirectory=orderpy-bridge
+RuntimeDirectoryMode=0755
+EnvironmentFile=/etc/orderpy-bridge/orderpy-bridge.env
+Environment=ORDERPY_BRIDGE_VARIANT=daemon
+Environment=ORDERPY_BRIDGE_RUNTIME_DIR=/run/orderpy-bridge
+WorkingDirectory=/opt/orderpy-bridge
+ExecStart=/opt/orderpy-bridge/bridge
+Restart=on-failure
+RestartSec=5
+ProtectSystem=strict
+ReadWritePaths=/var/lib/orderpy-bridge /run/orderpy-bridge
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

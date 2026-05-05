@@ -1,0 +1,27 @@
+# Bridge → Cloud: WebSocket/HTTP muss den API-Eingang erreichen, der /api/v1/bridges/connect
+# an den print-service routet (orderpy-saas: Dienst "api-proxy" auf Host-Port 8001).
+#
+# Start (SaaS-Stack läuft bereits auf localhost:8001):
+#   docker compose up --build -d
+#
+# Cloud-URL überschreiben (z. B. Linux ohne host.docker.internal):
+#   ORDERPY_CLOUD_URL=http://<Host-LAN-IP>:8001 docker compose up -d
+
+services:
+  orderpy-bridge:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+    container_name: orderpy-bridge
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "8088:8088"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data
+    environment:
+      ORDERPY_KEY_PATH: /app/data/bridge_key.pem
+      ORDERPY_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174
+      ORDERPY_CLOUD_URL: ${ORDERPY_CLOUD_URL:-http://host.docker.internal:8001}

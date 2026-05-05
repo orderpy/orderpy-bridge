@@ -1,0 +1,3 @@
+# Local minisign private key (never commit; add contents to GitHub secret MINISIGN_SECRET_KEY)
+deploy/updater/minisign.key
+*.minisign.key

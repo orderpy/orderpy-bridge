@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for OrderPy bridge update trigger
+
+[Path]
+PathChanged=/run/orderpy-bridge/update-requested.json
+Unit=orderpy-bridge-updater.service
+
+[Install]
+WantedBy=multi-user.target
